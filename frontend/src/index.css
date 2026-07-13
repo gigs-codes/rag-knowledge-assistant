@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+body {
+  margin: 0;
+}
+
+/*
+  Coffee theme background: a warm cream base with a subtle transparent
+  grid — one hairline grid in near-black, one offset by half a cell in
+  white, both at low opacity. Colors sampled from the portfolio's own
+  "Coffee" toggle (dark espresso #1a0f07 / cream text #f0e0c8 / caramel
+  accent #e8a74a), re-applied here on a light background instead of dark.
+*/
+.coffee-grid-bg {
+  background-color: #faf3ea;
+  background-image:
+    linear-gradient(rgba(44, 27, 18, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(44, 27, 18, 0.07) 1px, transparent 1px),
+    linear-gradient(rgba(255, 255, 255, 0.8) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.8) 1px, transparent 1px);
+  background-size: 48px 48px, 48px 48px, 48px 48px, 48px 48px;
+  background-position: -1px -1px, -1px -1px, 23px 23px, 23px 23px;
+}
