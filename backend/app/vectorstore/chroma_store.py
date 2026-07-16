@@ -12,11 +12,24 @@ letting Chroma embed internally: keeps the embedding model choice explicit
 and swappable independent of the vector store choice — two separate
 decisions, two separate adapters.
 """
+import logging
 import uuid
 
 import chromadb
 
 from app.core.config import settings
+
+# Chroma's own internal logger is noisy at WARNING level — in particular,
+# its HNSW index logs one line per stale ("tombstoned") entry it purges
+# during lazy cleanup, which can be thousands of lines after a dev
+# session's worth of repeated add/delete churn (as this project's own
+# testing produced). That's harmless to correctness, but at high volume
+# it's dangerous for anything that pipes this process's stderr through a
+# fixed-size OS pipe without draining it (a subprocess test harness, an
+# MCP client) — the writer can block once the pipe buffer fills, which
+# looks exactly like a hang. Capping this at ERROR is a one-line fix at
+# the source rather than a workaround in every consumer.
+logging.getLogger("chromadb").setLevel(logging.ERROR)
 
 
 class ChromaStore:

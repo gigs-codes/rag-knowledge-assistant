@@ -13,6 +13,9 @@ data/uploads/*
 !data/uploads/.gitkeep
 data/chroma/*
 !data/chroma/.gitkeep
+data/eval_chroma/
+data/eval_documents.json
+backend/eval/results.json
 
 # Node / frontend
 frontend/node_modules/

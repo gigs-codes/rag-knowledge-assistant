@@ -25,6 +25,7 @@ we may show a source the model didn't end up using, but we never hide
 a source that influenced the answer.
 """
 import time
+from collections.abc import Iterator
 
 from app.llm.base import LLMProvider
 from app.models.schemas import Citation, QueryResponse
@@ -39,6 +40,12 @@ information in the uploaded documents to answer that." Do not guess.
 - Be concise and factual. Do not invent details not present in the context."""
 
 
+_NO_INFO_MESSAGE = (
+    "I don't have enough information in the uploaded documents "
+    "to answer that. Try uploading a relevant document first."
+)
+
+
 def _build_user_prompt(question: str, hits: list[dict]) -> str:
     context_blocks = [
         f"[{i + 1}] (source: {hit['metadata']['filename']})\n{hit['text']}"
@@ -46,6 +53,19 @@ def _build_user_prompt(question: str, hits: list[dict]) -> str:
     ]
     context = "\n\n".join(context_blocks) if context_blocks else "(no relevant context found)"
     return f"Context sources:\n{context}\n\nQuestion: {question}"
+
+
+def _build_citations(hits: list[dict]) -> list[Citation]:
+    return [
+        Citation(
+            document_id=hit["metadata"]["document_id"],
+            filename=hit["metadata"]["filename"],
+            chunk_index=hit["metadata"]["chunk_index"],
+            text=hit["text"],
+            score=hit["score"],
+        )
+        for hit in hits
+    ]
 
 
 class ChatService:
@@ -61,24 +81,34 @@ class ChatService:
         hits = self._retrieval.retrieve(question, document_id=document_id)
 
         if not hits:
-            answer_text = (
-                "I don't have enough information in the uploaded documents "
-                "to answer that. Try uploading a relevant document first."
-            )
+            answer_text = _NO_INFO_MESSAGE
         else:
             user_prompt = _build_user_prompt(question, hits)
             answer_text = self._llm.generate(SYSTEM_PROMPT, user_prompt)
 
-        citations = [
-            Citation(
-                document_id=hit["metadata"]["document_id"],
-                filename=hit["metadata"]["filename"],
-                chunk_index=hit["metadata"]["chunk_index"],
-                text=hit["text"],
-                score=hit["score"],
-            )
-            for hit in hits
-        ]
+        latency_ms = int((time.perf_counter() - start) * 1000)
+        return QueryResponse(
+            answer=answer_text, citations=_build_citations(hits), latency_ms=latency_ms
+        )
+
+    def answer_stream(self, question: str, document_id: str | None = None) -> Iterator[dict]:
+        """Same retrieval + grounding logic as answer(), but yields
+        incremental events instead of building one final QueryResponse —
+        for the /query/stream endpoint. Citations are known and sent
+        BEFORE any token, since they come from retrieval (which happens
+        before generation starts either way); the client can render them
+        immediately rather than waiting for the full answer."""
+        start = time.perf_counter()
+
+        hits = self._retrieval.retrieve(question, document_id=document_id)
+        yield {"type": "citations", "citations": [c.model_dump(mode="json") for c in _build_citations(hits)]}
+
+        if not hits:
+            yield {"type": "token", "text": _NO_INFO_MESSAGE}
+        else:
+            user_prompt = _build_user_prompt(question, hits)
+            for token in self._llm.generate_stream(SYSTEM_PROMPT, user_prompt):
+                yield {"type": "token", "text": token}
 
         latency_ms = int((time.perf_counter() - start) * 1000)
-        return QueryResponse(answer=answer_text, citations=citations, latency_ms=latency_ms)
+        yield {"type": "done", "latency_ms": latency_ms}

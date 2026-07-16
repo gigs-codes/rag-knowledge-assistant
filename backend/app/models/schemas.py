@@ -44,3 +44,39 @@ class QueryResponse(BaseModel):
     answer: str
     citations: list[Citation]
     latency_ms: int
+
+
+class AgentQueryRequest(BaseModel):
+    question: str = Field(..., min_length=1, max_length=2000)
+    thread_id: str = Field(
+        default="default",
+        description="Conversation identifier — reused across calls to give the agent memory "
+        "of prior turns (see agent/graph.py's MemorySaver checkpointer).",
+    )
+
+
+class AgentQueryResponse(BaseModel):
+    answer: str
+    trace: list[str] = Field(description="Thought/Action/Observation steps the agent took.")
+    latency_ms: int
+
+
+class RegisterRequest(BaseModel):
+    username: str = Field(..., min_length=3, max_length=50)
+    password: str = Field(..., min_length=8, max_length=200)
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class UserOut(BaseModel):
+    username: str
+    role: str
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserOut

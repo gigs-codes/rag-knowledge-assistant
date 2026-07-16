@@ -1,1 +1,20 @@
-{}
+{
+  "4270899c-9ec3-4787-95ca-f63259a98e63": {
+    "id": "4270899c-9ec3-4787-95ca-f63259a98e63",
+    "filename": "HHI_Programming_Task_2026_Garima_Swami_Thought process.pdf",
+    "num_chunks": 7,
+    "uploaded_at": "2026-07-14T14:26:42.777159+00:00"
+  },
+  "d5bc87f4-d9b4-4ab8-a6bb-daa41c0d2909": {
+    "id": "d5bc87f4-d9b4-4ab8-a6bb-daa41c0d2909",
+    "filename": "Application_form_RUAS_EN_26_17412.pdf",
+    "num_chunks": 8,
+    "uploaded_at": "2026-07-16T08:54:22.206580+00:00"
+  },
+  "d24bd6cd-6283-42f1-9aae-0e1239d1688d": {
+    "id": "d24bd6cd-6283-42f1-9aae-0e1239d1688d",
+    "filename": "AI Engineering.pdf",
+    "num_chunks": 1762,
+    "uploaded_at": "2026-07-16T08:57:36.410422+00:00"
+  }
+}

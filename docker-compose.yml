@@ -1,0 +1,33 @@
+# Runs the full stack except Ollama, which stays on the HOST machine
+# (not containerized) — LLM inference benefits from direct GPU access,
+# and most people already have Ollama running locally for other things.
+# The backend container reaches it via `host.docker.internal`, Docker's
+# built-in DNS name for "the machine running Docker" (built into Docker
+# Desktop on Windows/Mac; the `extra_hosts` line below is what makes the
+# same name resolve on native Linux Docker).
+
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      - EKA_OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - EKA_JWT_SECRET_KEY=${JWT_SECRET_KEY:-dev-only-insecure-secret-change-me}
+    volumes:
+      # Bind-mounted (not a named volume) so uploaded PDFs, the Chroma
+      # index, and documents.json/users.json survive `docker compose down`
+      # and stay inspectable from the host at ./data — same directory the
+      # non-Docker dev setup already uses.
+      - ./data:/app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    restart: unless-stopped

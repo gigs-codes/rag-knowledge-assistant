@@ -38,6 +38,25 @@ class Settings(BaseSettings):
 
     # --- Retrieval ---
     top_k: int = 4
+    # Cosine similarity floor below which a chunk is dropped rather than
+    # shown as a "relevant" citation. Deliberately conservative (low) —
+    # observed scores for genuinely UNRELATED content with bge-small still
+    # land around 0.4-0.55 (embedding models have a real similarity floor
+    # from shared language statistics alone), so a threshold precise
+    # enough to reliably separate "relevant" from "not" would also risk
+    # cutting real matches phrased differently from the question. This is
+    # a coarse backstop against degenerate near-zero matches, not a
+    # substitute for the LLM's own grounding instruction — that instruction
+    # (see chat_service.py's SYSTEM_PROMPT) remains the primary defense
+    # against answering from irrelevant context.
+    min_relevance_score: float = 0.2
+
+    # --- Metadata storage ---
+    # None (default) means "use the JSON registry" — zero setup, works
+    # immediately. Set EKA_DATABASE_URL (e.g.
+    # postgresql://user:pass@host:5432/eka) to switch to Postgres instead;
+    # see api/deps.py for where that choice is actually made.
+    database_url: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="EKA_")
 

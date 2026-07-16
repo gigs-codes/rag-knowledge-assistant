@@ -32,7 +32,11 @@ export function DocumentPanel({ selectedId, onSelect }: Props) {
     }
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (id: string, filename: string) => {
+    // A confirmation dialog is the cheapest possible safeguard against a
+    // misclick — deletion is irreversible (the vectors and the source PDF
+    // are both gone), and there's no undo anywhere in this app.
+    if (!window.confirm(`Delete "${filename}"? This cannot be undone.`)) return;
     await deleteDocument(id);
     if (selectedId === id) onSelect(null);
     await refresh();
@@ -41,15 +45,16 @@ export function DocumentPanel({ selectedId, onSelect }: Props) {
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <h2 className="text-sm font-semibold text-[#5a4636] uppercase tracking-wide mb-2">
+        <h2 className="text-sm font-semibold text-neutral-500 uppercase tracking-wide mb-2">
           Documents
         </h2>
-        <label className="flex items-center justify-center border border-dashed border-[#c9a97e] rounded-lg h-24 cursor-pointer hover:border-[#c47a00] hover:bg-[#f3ddb2]/40 transition-colors text-sm text-[#8b6f52]">
-          {uploading ? "Uploading & embedding..." : "Click to upload a PDF"}
+        <label className="flex flex-col items-center justify-center border border-dashed border-neutral-300 rounded-lg h-24 cursor-pointer hover:border-neutral-500 hover:bg-neutral-100 transition-colors text-sm text-neutral-500">
+          <span>{uploading ? "Uploading & embedding..." : "Click to upload a document"}</span>
+          {!uploading && <span className="text-xs text-neutral-400 mt-1">PDF, DOCX, TXT, or MD</span>}
           <input
             ref={fileInput}
             type="file"
-            accept="application/pdf"
+            accept=".pdf,.docx,.txt,.md"
             className="hidden"
             disabled={uploading}
             onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0])}
@@ -63,8 +68,8 @@ export function DocumentPanel({ selectedId, onSelect }: Props) {
           onClick={() => onSelect(null)}
           className={`text-left text-sm px-3 py-2 rounded-md transition-colors ${
             selectedId === null
-              ? "bg-[#f3ddb2]/60 text-[#8b4e00]"
-              : "text-[#7a5c40] hover:bg-[#f0e4d3]"
+              ? "bg-neutral-900 text-white"
+              : "text-neutral-600 hover:bg-neutral-200"
           }`}
         >
           All documents
@@ -74,28 +79,28 @@ export function DocumentPanel({ selectedId, onSelect }: Props) {
             key={doc.id}
             className={`group flex items-center justify-between text-sm px-3 py-2 rounded-md cursor-pointer transition-colors ${
               selectedId === doc.id
-                ? "bg-[#f3ddb2]/60 text-[#8b4e00]"
-                : "text-[#4a3626] hover:bg-[#f0e4d3]"
+                ? "bg-neutral-900 text-white"
+                : "text-neutral-800 hover:bg-neutral-200"
             }`}
             onClick={() => onSelect(doc.id)}
           >
             <div className="truncate">
               <div className="truncate">{doc.filename}</div>
-              <div className="text-xs text-[#8b6f52]">{doc.num_chunks} chunks</div>
+              <div className="text-xs text-neutral-400">{doc.num_chunks} chunks</div>
             </div>
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                handleDelete(doc.id);
+                handleDelete(doc.id, doc.filename);
               }}
-              className="opacity-0 group-hover:opacity-100 text-[#8b6f52] hover:text-red-700 text-xs px-2"
+              className="opacity-0 group-hover:opacity-100 text-neutral-400 hover:text-red-700 text-xs px-2"
             >
               delete
             </button>
           </div>
         ))}
         {documents.length === 0 && (
-          <p className="text-xs text-[#a8916f] px-3">No documents uploaded yet.</p>
+          <p className="text-xs text-neutral-400 px-3">No documents uploaded yet.</p>
         )}
       </div>
     </div>

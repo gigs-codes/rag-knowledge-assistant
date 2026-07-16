@@ -8,7 +8,7 @@ in ten seconds to answer "what does this API expose?"
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import documents, query
+from app.api.routes import agent, documents, query
 from app.core.config import settings
 from app.core.logging import configure_logging
 
@@ -33,6 +33,7 @@ app.add_middleware(
 
 app.include_router(documents.router)
 app.include_router(query.router)
+app.include_router(agent.router)
 
 
 @app.get("/health")

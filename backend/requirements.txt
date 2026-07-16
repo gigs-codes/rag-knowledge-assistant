@@ -5,9 +5,24 @@ pydantic-settings==2.7.1
 python-multipart==0.0.20
 
 pypdf==5.1.0
+python-docx==1.1.2
 langchain-text-splitters==0.3.4
 
 sentence-transformers==3.3.1
 chromadb==0.5.23
 
 requests==2.32.3
+
+pytest==8.3.4
+
+sqlalchemy==2.0.36
+psycopg2-binary==2.9.10
+
+langgraph==0.2.62
+# Pinned explicitly, not left as a transitive resolve: installing the
+# official `mcp` SDK during development pulled in a Starlette version
+# incompatible with fastapi==0.115.6 and broke the app (that's why the
+# MCP server in mcp_server/ is hand-built over stdio instead of using
+# that SDK). Pinning here keeps `pip install` deterministic regardless of
+# what else gets added later, rather than depending on resolver ordering.
+starlette==0.41.3
