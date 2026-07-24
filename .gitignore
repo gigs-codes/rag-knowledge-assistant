@@ -16,6 +16,13 @@ data/chroma/*
 data/eval_chroma/
 data/eval_documents.json
 backend/eval/results.json
+data/bm25_index.pkl
+data/eval_bm25_index.pkl
+data/users.db
+data/feedback.db
+data/agent_checkpoints.db
+data/agent_checkpoints.db-shm
+data/agent_checkpoints.db-wal
 
 # Node / frontend
 frontend/node_modules/

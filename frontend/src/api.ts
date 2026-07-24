@@ -23,7 +23,31 @@ export interface QueryResponse {
   latency_ms: number;
 }
 
+export interface UserOut {
+  username: string;
+  role: string;
+}
+
+export interface TokenResponse {
+  access_token: string;
+  token_type: string;
+  user: UserOut;
+}
+
 const BASE = "/api";
+const TOKEN_KEY = "eka_token";
+
+export function getToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+export function setToken(token: string): void {
+  localStorage.setItem(TOKEN_KEY, token);
+}
+
+export function clearToken(): void {
+  localStorage.removeItem(TOKEN_KEY);
+}
 
 async function handle<T>(res: Response): Promise<T> {
   if (!res.ok) {
@@ -33,28 +57,79 @@ async function handle<T>(res: Response): Promise<T> {
   return res.json();
 }
 
+// Every request goes through here so the Authorization header only needs
+// to be built in one place. `init.headers` is kept as a plain object
+// (not merged via the Headers class) since every call site already only
+// ever passes a plain object, and this stays consistent with that.
+async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const token = getToken();
+  const headers = {
+    ...(init.headers as Record<string, string> | undefined),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+  return fetch(`${BASE}${path}`, { ...init, headers });
+}
+
+export async function register(username: string, password: string): Promise<TokenResponse> {
+  return handle(
+    await apiFetch("/auth/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    })
+  );
+}
+
+export async function login(username: string, password: string): Promise<TokenResponse> {
+  return handle(
+    await apiFetch("/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    })
+  );
+}
+
+export async function getMe(): Promise<UserOut> {
+  return handle(await apiFetch("/auth/me"));
+}
+
 export async function listDocuments(): Promise<DocumentOut[]> {
-  return handle(await fetch(`${BASE}/documents`));
+  return handle(await apiFetch("/documents"));
 }
 
 export async function uploadDocument(file: File): Promise<DocumentOut> {
   const form = new FormData();
   form.append("file", file);
-  const res = await fetch(`${BASE}/documents/upload`, { method: "POST", body: form });
+  const res = await apiFetch("/documents/upload", { method: "POST", body: form });
   const data = await handle<{ document: DocumentOut }>(res);
   return data.document;
 }
 
 export async function deleteDocument(id: string): Promise<void> {
-  await handle(await fetch(`${BASE}/documents/${id}`, { method: "DELETE" }));
+  await handle(await apiFetch(`/documents/${id}`, { method: "DELETE" }));
 }
 
 export async function askQuestion(question: string, documentId?: string): Promise<QueryResponse> {
   return handle(
-    await fetch(`${BASE}/query`, {
+    await apiFetch("/query", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ question, document_id: documentId ?? null }),
+    })
+  );
+}
+
+export async function submitFeedback(
+  question: string,
+  answer: string,
+  rating: "up" | "down"
+): Promise<void> {
+  await handle(
+    await apiFetch("/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question, answer, rating, source: "query" }),
     })
   );
 }
@@ -75,7 +150,7 @@ export async function askQuestionStream(
   documentId: string | undefined,
   onEvent: (event: StreamEvent) => void
 ): Promise<void> {
-  const res = await fetch(`${BASE}/query/stream`, {
+  const res = await apiFetch("/query/stream", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ question, document_id: documentId ?? null }),

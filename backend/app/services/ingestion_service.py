@@ -25,10 +25,13 @@ changes. That's the same "isolate the part that varies" idea as the
 LLMProvider/ChromaStore interfaces elsewhere in this codebase, just
 applied to input formats instead of providers.
 """
+import csv
 import re
 from pathlib import Path
 
 import docx
+import openpyxl
+import pdfplumber
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf import PdfReader
 
@@ -36,6 +39,8 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.document_registry_base import DocumentRegistryBase
 from app.services.embedding_service import EmbeddingService
+from app.services.guardrails import redact_pii
+from app.vectorstore.bm25_index import BM25Index
 from app.vectorstore.chroma_store import ChromaStore, new_document_id
 
 logger = get_logger(__name__)
@@ -47,10 +52,44 @@ _splitter = RecursiveCharacterTextSplitter(
 )
 
 
+def _cell_text(value) -> str:
+    return "" if value is None else str(value).strip().replace("\n", " ")
+
+
+def _rows_to_markdown_table(rows: list[list]) -> str:
+    header, *body = rows
+    lines = ["| " + " | ".join(_cell_text(c) for c in header) + " |"]
+    lines.append("| " + " | ".join("---" for _ in header) + " |")
+    for row in body:
+        lines.append("| " + " | ".join(_cell_text(c) for c in row) + " |")
+    return "\n".join(lines)
+
+
+def _extract_pdf_tables(path: Path) -> str:
+    # Additive second pass over the same PDF: pypdf's extract_text() (used
+    # in _extract_pdf below) reads prose well but flattens tables into
+    # unreadable interleaved text. pdfplumber's table detection recovers
+    # row/column structure instead, rendered as a markdown table so it
+    # flows through the same chunker/embedder pipeline as everything else
+    # — no separate storage path needed for tabular vs. prose content.
+    blocks = []
+    with pdfplumber.open(str(path)) as pdf:
+        for page_num, page in enumerate(pdf.pages, start=1):
+            for table in page.extract_tables():
+                rows = [row for row in table if any(cell not in (None, "") for cell in row)]
+                if len(rows) < 2:  # need at least a header + one data row
+                    continue
+                blocks.append(f"Table (page {page_num}):\n{_rows_to_markdown_table(rows)}")
+    return "\n\n".join(blocks)
+
+
 def _extract_pdf(path: Path) -> str:
     reader = PdfReader(str(path))
     pages = [page.extract_text() or "" for page in reader.pages]
-    return "\n\n".join(pages)
+    text = "\n\n".join(pages)
+
+    tables_text = _extract_pdf_tables(path)
+    return f"{text}\n\n{tables_text}" if tables_text else text
 
 
 def _extract_docx(path: Path) -> str:
@@ -67,11 +106,51 @@ def _extract_plain_text(path: Path) -> str:
     return path.read_bytes().decode("utf-8", errors="replace")
 
 
+def _extract_csv(path: Path) -> str:
+    # Serialized as "column: value | column: value" lines rather than left
+    # as raw comma-separated text — that keeps a row's column semantics
+    # attached to each value even after chunking splits it away from the
+    # header row, which matters once the header no longer sits next to
+    # the data in the embedded chunk.
+    lines = []
+    with open(path, newline="", encoding="utf-8", errors="replace") as f:
+        reader = csv.reader(f)
+        header = next(reader, None)
+        for row in reader:
+            if header:
+                pairs = [f"{h.strip()}: {v}" for h, v in zip(header, row)]
+            else:
+                pairs = list(row)
+            lines.append(" | ".join(pairs))
+    return "\n".join(lines)
+
+
+def _extract_xlsx(path: Path) -> str:
+    # Same row-serialization idea as _extract_csv, applied per sheet
+    # (prefixed with the sheet name, since a workbook's sheets are
+    # logically separate tables that shouldn't be blurred together).
+    workbook = openpyxl.load_workbook(path, data_only=True)
+    blocks = []
+    for sheet in workbook.worksheets:
+        rows = [row for row in sheet.iter_rows(values_only=True) if any(c is not None for c in row)]
+        if not rows:
+            continue
+        header, *data_rows = rows
+        lines = [f"Sheet: {sheet.title}"]
+        for row in data_rows:
+            pairs = [f"{_cell_text(h)}: {_cell_text(v)}" for h, v in zip(header, row) if h is not None]
+            lines.append(" | ".join(pairs))
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
 _EXTRACTORS = {
     ".pdf": _extract_pdf,
     ".docx": _extract_docx,
     ".txt": _extract_plain_text,
     ".md": _extract_plain_text,
+    ".csv": _extract_csv,
+    ".xlsx": _extract_xlsx,
 }
 
 # Exposed for the route layer to do a cheap, fast upfront rejection (see
@@ -97,10 +176,12 @@ class IngestionService:
         embedding_service: EmbeddingService,
         vector_store: ChromaStore,
         registry: DocumentRegistryBase,
+        bm25_index: BM25Index,
     ):
         self._embeddings = embedding_service
         self._store = vector_store
         self._registry = registry
+        self._bm25 = bm25_index
 
     def ingest_document(self, file_bytes: bytes, filename: str) -> dict:
         extension = Path(filename).suffix.lower()
@@ -120,17 +201,23 @@ class IngestionService:
             raise ValueError(
                 f"No extractable text found in '{filename}' (is it empty, or a scanned image?)."
             )
+        # Scrub PII before it's ever chunked/embedded/stored — see
+        # guardrails.py's docstring for why this has to happen here and
+        # not later.
+        clean_text = redact_pii(clean_text)
 
         chunks = _splitter.split_text(clean_text)
         logger.info("Ingesting %s: %d chunks", filename, len(chunks))
 
         vectors = self._embeddings.embed_texts(chunks)
         self._store.add_chunks(document_id, filename, chunks, vectors)
+        self._bm25.add_document(document_id, filename, chunks)
 
         return self._registry.add(document_id, filename, len(chunks))
 
     def delete_document(self, document_id: str) -> None:
         self._store.delete_document(document_id)
+        self._bm25.remove_document(document_id)
         self._registry.delete(document_id)
         # Glob rather than a fixed extension: the file on disk could be
         # .pdf/.docx/.txt/.md depending on what was originally uploaded,

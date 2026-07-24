@@ -8,13 +8,14 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
 from app.api.deps import get_chat_service
+from app.api.security import get_current_user
 from app.models.schemas import QueryRequest, QueryResponse
 from app.services.chat_service import ChatService
 
 router = APIRouter(prefix="/query", tags=["query"])
 
 
-@router.post("", response_model=QueryResponse)
+@router.post("", response_model=QueryResponse, dependencies=[Depends(get_current_user)])
 def ask_question(
     request: QueryRequest,
     chat_service: ChatService = Depends(get_chat_service),
@@ -27,7 +28,7 @@ def _sse_format(events: Iterator[dict]) -> Iterator[str]:
         yield f"data: {json.dumps(event)}\n\n"
 
 
-@router.post("/stream")
+@router.post("/stream", dependencies=[Depends(get_current_user)])
 def ask_question_stream(
     request: QueryRequest,
     chat_service: ChatService = Depends(get_chat_service),

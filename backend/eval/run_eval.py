@@ -35,7 +35,9 @@ from app.services.chat_service import ChatService  # noqa: E402
 from app.services.document_registry import DocumentRegistry  # noqa: E402
 from app.services.embedding_service import EmbeddingService  # noqa: E402
 from app.services.ingestion_service import IngestionService  # noqa: E402
+from app.services.reranker_service import RerankerService  # noqa: E402
 from app.services.retrieval_service import RetrievalService  # noqa: E402
+from app.vectorstore.bm25_index import BM25Index  # noqa: E402
 from app.vectorstore.chroma_store import ChromaStore  # noqa: E402
 from eval.golden_set import FIXTURE_DOCUMENT_TEXT, FIXTURE_FILENAME, GOLDEN_SET  # noqa: E402
 from eval.judge import is_refusal, score_answer_relevancy, score_faithfulness  # noqa: E402
@@ -45,10 +47,15 @@ def _build_isolated_services():
     embedding_service = EmbeddingService()
     vector_store = ChromaStore(persist_dir=str(settings.base_dir / "data" / "eval_chroma"))
     registry = DocumentRegistry(path=settings.base_dir / "data" / "eval_documents.json")
+    # Isolated from the app's real BM25 index for the same reason as
+    # vector_store/registry above — the eval fixture shouldn't leak into
+    # real retrieval or vice versa.
+    bm25_index = BM25Index(persist_path=settings.base_dir / "data" / "eval_bm25_index.pkl")
+    reranker = RerankerService()
     llm_provider = OllamaProvider()
 
-    ingestion_service = IngestionService(embedding_service, vector_store, registry)
-    retrieval_service = RetrievalService(embedding_service, vector_store)
+    ingestion_service = IngestionService(embedding_service, vector_store, registry, bm25_index)
+    retrieval_service = RetrievalService(embedding_service, vector_store, bm25_index, reranker)
     chat_service = ChatService(retrieval_service, llm_provider)
     return ingestion_service, registry, chat_service, llm_provider
 

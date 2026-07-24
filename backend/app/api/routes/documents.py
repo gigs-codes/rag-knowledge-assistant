@@ -12,6 +12,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 
 from app.api.deps import get_ingestion_service, get_registry
+from app.api.security import get_current_user, require_role
 from app.models.schemas import DocumentOut, UploadResponse
 from app.services.document_registry_base import DocumentRegistryBase
 from app.services.ingestion_service import SUPPORTED_EXTENSIONS, IngestionService
@@ -19,7 +20,7 @@ from app.services.ingestion_service import SUPPORTED_EXTENSIONS, IngestionServic
 router = APIRouter(prefix="/documents", tags=["documents"])
 
 
-@router.post("/upload", response_model=UploadResponse)
+@router.post("/upload", response_model=UploadResponse, dependencies=[Depends(require_role("admin"))])
 async def upload_document(
     file: UploadFile,
     ingestion_service: IngestionService = Depends(get_ingestion_service),
@@ -45,12 +46,12 @@ async def upload_document(
     return UploadResponse(document=DocumentOut(**record), message="Document ingested successfully.")
 
 
-@router.get("", response_model=list[DocumentOut])
+@router.get("", response_model=list[DocumentOut], dependencies=[Depends(get_current_user)])
 def list_documents(registry: DocumentRegistryBase = Depends(get_registry)):
     return registry.list()
 
 
-@router.delete("/{document_id}")
+@router.delete("/{document_id}", dependencies=[Depends(require_role("admin"))])
 def delete_document(
     document_id: str,
     ingestion_service: IngestionService = Depends(get_ingestion_service),

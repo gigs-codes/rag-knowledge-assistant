@@ -28,6 +28,23 @@ class FakeLLM(LLMProvider):
         yield self.response
 
 
+class SequencedFakeLLM(LLMProvider):
+    """Returns each response in order, one per call — for tests that need
+    to distinguish the decomposition call from the final-answer call."""
+
+    def __init__(self, responses: list[str]):
+        self.responses = list(responses)
+        self.calls: list[tuple[str, str]] = []
+
+    def generate(self, system_prompt: str, user_prompt: str) -> str:
+        self.calls.append((system_prompt, user_prompt))
+        return self.responses.pop(0)
+
+    def generate_stream(self, system_prompt: str, user_prompt: str) -> Iterator[str]:
+        self.calls.append((system_prompt, user_prompt))
+        yield self.responses.pop(0)
+
+
 def _retrieval_returning(hits):
     retrieval = MagicMock()
     retrieval.retrieve.return_value = hits
@@ -87,6 +104,61 @@ def test_answer_always_reports_nonnegative_latency():
     service = ChatService(_retrieval_returning([]), FakeLLM())
     response = service.answer("question")
     assert response.latency_ms >= 0
+
+
+def test_answer_skips_decomposition_for_simple_questions():
+    hits = [
+        {
+            "text": "Remote work is allowed 3 days a week.",
+            "metadata": {"document_id": "d1", "filename": "policy.pdf", "chunk_index": 0},
+            "score": 0.9,
+        }
+    ]
+    retrieval = _retrieval_returning(hits)
+    service = ChatService(retrieval, FakeLLM(response="answer"))
+
+    service.answer("What is the remote work policy?")
+
+    retrieval.retrieve.assert_called_once_with("What is the remote work policy?", document_id=None)
+
+
+def test_answer_decomposes_compound_questions_and_merges_hits():
+    hit_a = {
+        "text": "Remote work is allowed 3 days a week.",
+        "metadata": {"document_id": "d1", "filename": "a.pdf", "chunk_index": 0},
+        "score": 0.9,
+    }
+    hit_b = {
+        "text": "The office is in Berlin.",
+        "metadata": {"document_id": "d2", "filename": "b.pdf", "chunk_index": 0},
+        "score": 0.8,
+    }
+    retrieval = MagicMock()
+    retrieval.retrieve.side_effect = [[hit_a], [hit_b]]
+    llm = SequencedFakeLLM(["What is the remote work policy?\nWhere is the office?", "combined answer"])
+    service = ChatService(retrieval, llm)
+
+    response = service.answer("What is the remote work policy and where is the office?")
+
+    assert retrieval.retrieve.call_count == 2
+    assert response.answer == "combined answer"
+    assert len(response.citations) == 2
+
+
+def test_answer_decomposition_dedupes_hits_shared_across_sub_questions():
+    shared_hit = {
+        "text": "Remote work is allowed 3 days a week.",
+        "metadata": {"document_id": "d1", "filename": "a.pdf", "chunk_index": 0},
+        "score": 0.9,
+    }
+    retrieval = MagicMock()
+    retrieval.retrieve.side_effect = [[shared_hit], [shared_hit]]
+    llm = SequencedFakeLLM(["sub question one?\nsub question two?", "answer"])
+    service = ChatService(retrieval, llm)
+
+    response = service.answer("compound question one and compound question two?")
+
+    assert len(response.citations) == 1
 
 
 class StreamingFakeLLM(LLMProvider):

@@ -46,12 +46,16 @@ import sys
 
 from app.core.config import settings
 from app.services.embedding_service import EmbeddingService
+from app.services.reranker_service import RerankerService
 from app.services.retrieval_service import RetrievalService
+from app.vectorstore.bm25_index import BM25Index
 from app.vectorstore.chroma_store import ChromaStore
 
 _embedding_service = EmbeddingService()
 _vector_store = ChromaStore(persist_dir=str(settings.chroma_dir))
-_retrieval_service = RetrievalService(_embedding_service, _vector_store)
+_bm25_index = BM25Index()
+_reranker_service = RerankerService()
+_retrieval_service = RetrievalService(_embedding_service, _vector_store, _bm25_index, _reranker_service)
 
 SERVER_INFO = {"name": "enterprise-knowledge-assistant", "version": "0.1.0"}
 PROTOCOL_VERSION = "2024-11-05"

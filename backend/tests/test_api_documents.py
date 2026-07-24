@@ -18,12 +18,27 @@ point, not worth it purely to make this file marginally faster today.
 """
 from unittest.mock import MagicMock
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.api.deps import get_ingestion_service, get_registry
+from app.api.security import get_current_user
 from app.main import app
+from app.models.schemas import UserOut
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _authenticated_as_admin():
+    # These tests exercise upload/delete, which now require the admin
+    # role (see documents.py) — default every test in this file to an
+    # admin identity so existing behavior stays covered without each test
+    # wiring up a real JWT. Role-gating itself is verified separately
+    # below (test_upload_requires_admin_role, test_delete_requires_admin_role).
+    app.dependency_overrides[get_current_user] = lambda: UserOut(username="test-admin", role="admin")
+    yield
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 def test_upload_rejects_unsupported_extension():
@@ -121,3 +136,42 @@ def test_delete_existing_document_succeeds():
     finally:
         app.dependency_overrides.pop(get_registry, None)
         app.dependency_overrides.pop(get_ingestion_service, None)
+
+
+def test_upload_requires_admin_role():
+    app.dependency_overrides[get_current_user] = lambda: UserOut(username="viewer1", role="viewer")
+    try:
+        response = client.post(
+            "/documents/upload", files={"file": ("notes.txt", b"hello", "text/plain")}
+        )
+        assert response.status_code == 403
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+def test_upload_without_auth_returns_401():
+    app.dependency_overrides.pop(get_current_user, None)
+    response = client.post("/documents/upload", files={"file": ("notes.txt", b"hello", "text/plain")})
+    assert response.status_code == 401
+
+
+def test_delete_requires_admin_role():
+    app.dependency_overrides[get_current_user] = lambda: UserOut(username="viewer1", role="viewer")
+    try:
+        response = client.delete("/documents/doc-1")
+        assert response.status_code == 403
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+def test_list_documents_allows_viewer_role():
+    fake_registry = MagicMock()
+    fake_registry.list.return_value = []
+    app.dependency_overrides[get_registry] = lambda: fake_registry
+    app.dependency_overrides[get_current_user] = lambda: UserOut(username="viewer1", role="viewer")
+    try:
+        response = client.get("/documents")
+        assert response.status_code == 200
+    finally:
+        app.dependency_overrides.pop(get_registry, None)
+        app.dependency_overrides.pop(get_current_user, None)

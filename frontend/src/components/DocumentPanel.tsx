@@ -4,9 +4,11 @@ import { deleteDocument, listDocuments, uploadDocument, type DocumentOut } from 
 interface Props {
   selectedId: string | null;
   onSelect: (id: string | null) => void;
+  role: string;
 }
 
-export function DocumentPanel({ selectedId, onSelect }: Props) {
+export function DocumentPanel({ selectedId, onSelect, role }: Props) {
+  const isAdmin = role === "admin";
   const [documents, setDocuments] = useState<DocumentOut[]>([]);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,18 +50,22 @@ export function DocumentPanel({ selectedId, onSelect }: Props) {
         <h2 className="text-sm font-semibold text-neutral-500 uppercase tracking-wide mb-2">
           Documents
         </h2>
-        <label className="flex flex-col items-center justify-center border border-dashed border-neutral-300 rounded-lg h-24 cursor-pointer hover:border-neutral-500 hover:bg-neutral-100 transition-colors text-sm text-neutral-500">
-          <span>{uploading ? "Uploading & embedding..." : "Click to upload a document"}</span>
-          {!uploading && <span className="text-xs text-neutral-400 mt-1">PDF, DOCX, TXT, or MD</span>}
-          <input
-            ref={fileInput}
-            type="file"
-            accept=".pdf,.docx,.txt,.md"
-            className="hidden"
-            disabled={uploading}
-            onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0])}
-          />
-        </label>
+        {isAdmin && (
+          <label className="flex flex-col items-center justify-center border border-dashed border-neutral-300 rounded-lg h-24 cursor-pointer hover:border-neutral-500 hover:bg-neutral-100 transition-colors text-sm text-neutral-500">
+            <span>{uploading ? "Uploading & embedding..." : "Click to upload a document"}</span>
+            {!uploading && (
+              <span className="text-xs text-neutral-400 mt-1">PDF, DOCX, TXT, MD, CSV, or XLSX</span>
+            )}
+            <input
+              ref={fileInput}
+              type="file"
+              accept=".pdf,.docx,.txt,.md,.csv,.xlsx"
+              className="hidden"
+              disabled={uploading}
+              onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0])}
+            />
+          </label>
+        )}
         {error && <p className="text-red-700 text-xs mt-2">{error}</p>}
       </div>
 
@@ -88,15 +94,17 @@ export function DocumentPanel({ selectedId, onSelect }: Props) {
               <div className="truncate">{doc.filename}</div>
               <div className="text-xs text-neutral-400">{doc.num_chunks} chunks</div>
             </div>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                handleDelete(doc.id, doc.filename);
-              }}
-              className="opacity-0 group-hover:opacity-100 text-neutral-400 hover:text-red-700 text-xs px-2"
-            >
-              delete
-            </button>
+            {isAdmin && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDelete(doc.id, doc.filename);
+                }}
+                className="opacity-0 group-hover:opacity-100 text-neutral-400 hover:text-red-700 text-xs px-2"
+              >
+                delete
+              </button>
+            )}
           </div>
         ))}
         {documents.length === 0 && (

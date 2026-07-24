@@ -9,13 +9,14 @@ import time
 from fastapi import APIRouter, Depends
 
 from app.api.deps import get_agent_graph
+from app.api.security import get_current_user
 from app.agent.graph import run_agent
 from app.models.schemas import AgentQueryRequest, AgentQueryResponse
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
 
-@router.post("/ask", response_model=AgentQueryResponse)
+@router.post("/ask", response_model=AgentQueryResponse, dependencies=[Depends(get_current_user)])
 def ask_agent(request: AgentQueryRequest, graph=Depends(get_agent_graph)):
     start = time.perf_counter()
     result = run_agent(graph, request.question, request.thread_id)

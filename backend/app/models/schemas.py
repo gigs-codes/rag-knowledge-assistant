@@ -8,6 +8,7 @@ Keeping them in one file makes the API surface easy to review in one glance
 (useful when someone asks "what does this API actually expose?").
 """
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -51,7 +52,7 @@ class AgentQueryRequest(BaseModel):
     thread_id: str = Field(
         default="default",
         description="Conversation identifier — reused across calls to give the agent memory "
-        "of prior turns (see agent/graph.py's MemorySaver checkpointer).",
+        "of prior turns, persisted across restarts (see agent/graph.py's SqliteSaver checkpointer).",
     )
 
 
@@ -80,3 +81,19 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserOut
+
+
+class FeedbackRequest(BaseModel):
+    question: str = Field(..., min_length=1, max_length=2000)
+    answer: str = Field(..., min_length=1)
+    rating: Literal["up", "down"]
+    source: Literal["query", "agent"] = "query"
+
+
+class FeedbackOut(BaseModel):
+    id: int
+    question: str
+    answer: str
+    rating: str
+    source: str
+    created_at: datetime

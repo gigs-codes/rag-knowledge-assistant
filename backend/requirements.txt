@@ -26,3 +26,23 @@ langgraph==0.2.62
 # that SDK). Pinning here keeps `pip install` deterministic regardless of
 # what else gets added later, rather than depending on resolver ordering.
 starlette==0.41.3
+
+# Auth (JWT + password hashing)
+pyjwt==2.10.1
+bcrypt==4.2.1
+
+# Hybrid retrieval (BM25 keyword search + cross-encoder reranking)
+rank-bm25==0.2.2
+
+# Multimodal ingestion (CSV/XLSX + PDF table extraction) — pure Python,
+# no OCR/system binaries required
+openpyxl==3.1.5
+pdfplumber==0.11.4
+
+# Agent conversation persistence (survives backend restarts). Pinned to
+# 2.0.11, not latest — the newest langgraph-checkpoint-sqlite pulls in
+# langgraph-checkpoint 4.x, which conflicts with langgraph==0.2.62's own
+# pin (langgraph-checkpoint<3.0.0). 2.0.11 resolves to langgraph-checkpoint
+# 2.1.2, which satisfies both. Same "conflicting transitive pin" situation
+# already documented for starlette above.
+langgraph-checkpoint-sqlite==2.0.11

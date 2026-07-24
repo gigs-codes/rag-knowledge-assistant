@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { askQuestionStream, type Citation } from "../api";
+import { askQuestionStream, submitFeedback, type Citation } from "../api";
 
 interface Props {
   documentId: string | null;
@@ -12,6 +12,7 @@ interface Exchange {
   latencyMs?: number;
   streaming?: boolean;
   error?: string;
+  feedback?: "up" | "down"; // set once the user rates this answer
 }
 
 const HISTORY_KEY = "eka_history";
@@ -70,6 +71,20 @@ export function AskPanel({ documentId }: Props) {
     setHistory([]);
   };
 
+  const handleFeedback = async (index: number, rating: "up" | "down") => {
+    const ex = history[index];
+    if (!ex.answer || ex.feedback) return; // one rating per answer
+    setHistory((h) => h.map((e, i) => (i === index ? { ...e, feedback: rating } : e)));
+    try {
+      await submitFeedback(ex.question, ex.answer, rating);
+    } catch {
+      // Best-effort — a failed feedback submission shouldn't disrupt the
+      // chat, so just revert the optimistic UI update rather than
+      // surfacing an error for something this low-stakes.
+      setHistory((h) => h.map((e, i) => (i === index ? { ...e, feedback: undefined } : e)));
+    }
+  };
+
   return (
     <div className="flex flex-col h-full">
       {history.length > 0 && (
@@ -105,7 +120,37 @@ export function AskPanel({ documentId }: Props) {
                   <div className="text-sm text-neutral-500 animate-pulse">Thinking…</div>
                 )}
                 {ex.latencyMs !== undefined && (
-                  <div className="text-xs text-neutral-400">{ex.latencyMs} ms</div>
+                  <div className="flex items-center gap-3 text-xs text-neutral-400">
+                    <span>{ex.latencyMs} ms</span>
+                    {ex.answer && !ex.streaming && (
+                      <span className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleFeedback(i, "up")}
+                          disabled={!!ex.feedback}
+                          title="Good answer"
+                          className={`px-1.5 py-0.5 rounded border transition-colors ${
+                            ex.feedback === "up"
+                              ? "border-neutral-900 text-neutral-900"
+                              : "border-neutral-200 text-neutral-400 hover:text-neutral-700 hover:border-neutral-400 disabled:hover:text-neutral-300 disabled:hover:border-neutral-200"
+                          }`}
+                        >
+                          Helpful
+                        </button>
+                        <button
+                          onClick={() => handleFeedback(i, "down")}
+                          disabled={!!ex.feedback}
+                          title="Bad answer"
+                          className={`px-1.5 py-0.5 rounded border transition-colors ${
+                            ex.feedback === "down"
+                              ? "border-neutral-900 text-neutral-900"
+                              : "border-neutral-200 text-neutral-400 hover:text-neutral-700 hover:border-neutral-400 disabled:hover:text-neutral-300 disabled:hover:border-neutral-200"
+                          }`}
+                        >
+                          Not helpful
+                        </button>
+                      </span>
+                    )}
+                  </div>
                 )}
                 {ex.citations && ex.citations.length > 0 && (
                   <div className="flex flex-col gap-1">

@@ -20,10 +20,17 @@ Why LangGraph at all, then, if we're not using its tool-binding: LangGraph
 gives us the explicit graph (nodes, edges, conditional routing) and —
 more importantly — the checkpointer, which is what gives this agent
 memory across turns without us hand-rolling session storage.
+
+Checkpointer: build_agent_graph() takes one as a parameter rather than
+hardcoding it, so the caller decides persistence — api/deps.py passes a
+SqliteSaver (data/agent_checkpoints.db) so conversations survive a
+backend restart; a test can pass a plain MemorySaver (the default) to
+avoid touching disk.
 """
 import re
 from typing import TypedDict
 
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
@@ -194,7 +201,11 @@ def _route_after_planner(state: AgentState) -> str:
     return "end"
 
 
-def build_agent_graph(llm: LLMProvider, retrieval_service: RetrievalService):
+def build_agent_graph(
+    llm: LLMProvider,
+    retrieval_service: RetrievalService,
+    checkpointer: BaseCheckpointSaver | None = None,
+):
     tools = build_tools(retrieval_service)
     tools_by_name = {t.name: t for t in tools}
     tool_descriptions = "\n".join(f"- {t.name}: {t.description}" for t in tools)
@@ -210,7 +221,7 @@ def build_agent_graph(llm: LLMProvider, retrieval_service: RetrievalService):
     graph.add_conditional_edges("planner", _route_after_planner, {"tool": "tool", "end": END})
     graph.add_edge("tool", "planner")
 
-    return graph.compile(checkpointer=MemorySaver())
+    return graph.compile(checkpointer=checkpointer or MemorySaver())
 
 
 def run_agent(compiled_graph, question: str, thread_id: str) -> dict:

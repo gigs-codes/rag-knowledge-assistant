@@ -1,0 +1,43 @@
+# CI: backend tests + frontend build, on every push/PR.
+#
+# What's deliberately NOT run here: eval/run_eval.py and anything needing
+# a live Ollama — this is a hosted runner with no local LLM, and there's
+# no free/hosted Ollama endpoint to point at instead. Any pytest test that
+# needs a live Ollama connection follows the same skipif-on-unreachable
+# pattern already used for the Postgres-backed registry tests (see
+# tests/test_postgres_document_registry.py), so this workflow doesn't need
+# to special-case them — they just skip gracefully here too.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - run: pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm ci
+      - run: npm run build

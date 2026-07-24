@@ -17,6 +17,7 @@ import operator
 
 from langchain_core.tools import BaseTool, tool
 
+from app.services.guardrails import detect_prompt_injection
 from app.services.retrieval_service import RetrievalService
 
 _SAFE_OPERATORS = {
@@ -58,6 +59,12 @@ def build_tools(retrieval_service: RetrievalService) -> list[BaseTool]:
         hits = retrieval_service.retrieve(query, top_k=3)
         if not hits:
             return "No relevant documents found."
+        # Flag (not block) — same reasoning as chat_service.py's use of
+        # this same check: retrieved document content reaching the agent
+        # as an Observation is exactly the indirect-injection surface this
+        # guards against.
+        for hit in hits:
+            detect_prompt_injection(hit["text"])
         return "\n\n".join(
             f"(source: {hit['metadata']['filename']}) {hit['text']}" for hit in hits
         )

@@ -2,13 +2,22 @@
 docstring for why importing app.main has a one-time startup cost."""
 from unittest.mock import MagicMock
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.api.deps import get_chat_service
+from app.api.security import get_current_user
 from app.main import app
-from app.models.schemas import QueryResponse
+from app.models.schemas import QueryResponse, UserOut
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _authenticated():
+    app.dependency_overrides[get_current_user] = lambda: UserOut(username="test-user", role="viewer")
+    yield
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 def test_query_delegates_to_chat_service_and_returns_its_response():
@@ -43,3 +52,9 @@ def test_query_rejects_empty_question():
 def test_query_rejects_missing_question_field():
     response = client.post("/query", json={})
     assert response.status_code == 422
+
+
+def test_query_without_auth_returns_401():
+    app.dependency_overrides.pop(get_current_user, None)
+    response = client.post("/query", json={"question": "q"})
+    assert response.status_code == 401

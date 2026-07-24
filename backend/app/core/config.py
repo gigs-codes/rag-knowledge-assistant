@@ -58,6 +58,20 @@ class Settings(BaseSettings):
     # see api/deps.py for where that choice is actually made.
     database_url: str | None = None
 
+    # --- Auth ---
+    # Dev-only default so the app still boots with zero setup; docker-compose.yml
+    # already overrides this via EKA_JWT_SECRET_KEY for anything beyond local dev.
+    jwt_secret_key: str = "dev-only-insecure-secret-change-me"
+    jwt_algorithm: str = "HS256"
+    jwt_expire_minutes: int = 480
+
+    # Where the SQLite-backed auth/feedback/agent-memory stores live —
+    # separate small files rather than one shared DB, so each concern
+    # (users, feedback, agent checkpoints) can be inspected/reset independently.
+    users_db_path: Path = base_dir / "data" / "users.db"
+    feedback_db_path: Path = base_dir / "data" / "feedback.db"
+    agent_checkpoints_db_path: Path = base_dir / "data" / "agent_checkpoints.db"
+
     model_config = SettingsConfigDict(env_file=".env", env_prefix="EKA_")
 
 
