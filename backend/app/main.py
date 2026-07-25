@@ -7,9 +7,11 @@ in ten seconds to answer "what does this API expose?"
 """
 import time
 import uuid
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import agent, auth, documents, feedback, query
 from app.core.config import settings
@@ -67,7 +69,33 @@ app.include_router(query.router)
 app.include_router(agent.router)
 app.include_router(feedback.router)
 
+# Same routers again, under /api — needed for the single-container deploy
+# (see Dockerfile/deploy/start.sh) where FastAPI serves the built frontend
+# directly and there's no nginx/Vite dev-proxy to strip the "/api" prefix
+# the frontend's api.ts sends. Purely additive: the unprefixed mounts above
+# are untouched, so local dev, docker-compose (nginx does the stripping
+# there), and every existing test hitting bare paths keep working exactly
+# as before.
+app.include_router(auth.router, prefix="/api")
+app.include_router(documents.router, prefix="/api")
+app.include_router(query.router, prefix="/api")
+app.include_router(agent.router, prefix="/api")
+app.include_router(feedback.router, prefix="/api")
+
 
 @app.get("/health")
 def health_check():
     return {"status": "ok", "app": settings.app_name}
+
+
+# Serves the built frontend (see Dockerfile's frontend-build stage, copied
+# to ./static) in the single-container deployment. Guarded on the
+# directory actually existing so local dev (uvicorn run from backend/,
+# where no "static" dir exists) is unaffected — this mount is a no-op
+# outside the Docker image. Registered last so it never shadows the API
+# routes or /health above: FastAPI/Starlette try more specific,
+# earlier-registered routes before falling through to a mount. No SPA
+# route-fallback wildcard needed — this is a single-view app with no
+# client-side routing (see App.tsx).
+if Path("static").is_dir():
+    app.mount("/", StaticFiles(directory="static", html=True), name="static")

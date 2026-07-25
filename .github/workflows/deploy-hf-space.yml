@@ -1,0 +1,33 @@
+# Mirrors main to a Hugging Face Space on every push — "push to GitHub"
+# is effectively "deploy," since HF Spaces builds the root Dockerfile
+# itself once it receives the push. See README.md's "Deploying a live
+# demo" section for the one-time setup this depends on (HF_TOKEN secret,
+# filling in the placeholders below).
+name: Deploy to Hugging Face Spaces
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Skips cleanly (not a failing red X) until the one-time setup in
+    # README.md is done — no point trying to push without a token.
+    if: ${{ vars.HF_SPACE_CONFIGURED == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push to Hugging Face Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          # Replace <HF_USERNAME>/<SPACE_NAME> with your actual Space —
+          # see README.md for how to create one. Force-push is safe here:
+          # this targets only the Space's own mirror repo (not this GitHub
+          # repo), which has no independent history worth preserving.
+          git remote add space "https://user:${HF_TOKEN}@huggingface.co/spaces/<HF_USERNAME>/<SPACE_NAME>"
+          git push --force space HEAD:main

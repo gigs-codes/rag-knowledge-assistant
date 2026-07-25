@@ -129,6 +129,51 @@ Frontend: http://localhost:5173 · Backend: http://localhost:8000
 Set a real `EKA_JWT_SECRET_KEY` (env var or `.env`) before deploying
 anywhere shared — it defaults to a dev-only placeholder otherwise.
 
+### Deploying a live demo (Hugging Face Spaces)
+
+The root `Dockerfile` (distinct from `backend/Dockerfile` and
+`frontend/Dockerfile`, which are for the two-container `docker compose`
+setup above) builds a **single** container — frontend + backend + Ollama
+together — for platforms like Hugging Face Spaces that run one container
+on one port. `app/main.py` serves the built frontend directly and mounts
+every API route under `/api` in addition to its normal path, so there's no
+nginx/proxy layer needed inside the container.
+
+One-time setup:
+1. Create a Hugging Face account at [huggingface.co](https://huggingface.co)
+   if you don't have one.
+2. Create a new Space at huggingface.co/new-space, selecting **Docker** as
+   the SDK (any name/visibility). It'll build from an empty repo initially
+   — that's fine, the GitHub Action below pushes real content to it.
+3. Generate an access token with **write** scope: Settings → Access Tokens
+   → Create new token.
+4. In this GitHub repo: Settings → Secrets and variables → Actions → Secrets
+   tab → New repository secret, named `HF_TOKEN`, value = that token.
+5. Same page, Variables tab → New repository variable, named
+   `HF_SPACE_CONFIGURED`, value = `true`. (Gates the deploy workflow so it
+   skips cleanly instead of failing on every push before you've done steps
+   1-4.)
+6. Edit `.github/workflows/deploy-hf-space.yml` and replace
+   `<HF_USERNAME>/<SPACE_NAME>` with your actual Space's path.
+
+After that, every push to `main` triggers `.github/workflows/deploy-hf-space.yml`,
+which mirrors the repo to the Space; Hugging Face builds the root
+`Dockerfile` and the app goes live at
+`https://huggingface.co/spaces/<HF_USERNAME>/<SPACE_NAME>`.
+
+**Known limitation:** free HF Spaces have ephemeral disk storage —
+uploaded documents, the Chroma/BM25 index, and the SQLite-backed stores
+(users, feedback, agent memory) reset on every redeploy. Persistent
+storage is a paid HF add-on, out of scope for a zero-cost demo. Register
+a fresh account and re-upload a demo document after each deploy.
+
+To test the single-container image locally before ever touching HF:
+```bash
+docker build -t eka-demo .
+docker run -p 7860:7860 eka-demo
+```
+App: http://localhost:7860
+
 ### Tests
 ```bash
 cd backend

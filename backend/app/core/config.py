@@ -11,6 +11,7 @@ directly. That means:
 """
 from pathlib import Path
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -73,6 +74,25 @@ class Settings(BaseSettings):
     agent_checkpoints_db_path: Path = base_dir / "data" / "agent_checkpoints.db"
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="EKA_")
+
+    # Pydantic evaluates a field's default expression (e.g. `base_dir /
+    # "data" / "uploads"` above) once, at class-definition time, using
+    # whatever `base_dir` resolves to AT THAT LINE — the bare class
+    # default, not the actual runtime value after EKA_BASE_DIR's env
+    # override is applied. Every path derived from `base_dir` above was
+    # silently ignoring EKA_BASE_DIR as a result (only `base_dir` itself
+    # picked up the override; everything derived from it stayed pinned to
+    # the class-body-time value). A model_validator running AFTER all
+    # fields (including the real, possibly-overridden base_dir) are
+    # resolved is the correct place to re-derive them.
+    @model_validator(mode="after")
+    def _rederive_paths_from_base_dir(self) -> "Settings":
+        self.upload_dir = self.base_dir / "data" / "uploads"
+        self.chroma_dir = self.base_dir / "data" / "chroma"
+        self.users_db_path = self.base_dir / "data" / "users.db"
+        self.feedback_db_path = self.base_dir / "data" / "feedback.db"
+        self.agent_checkpoints_db_path = self.base_dir / "data" / "agent_checkpoints.db"
+        return self
 
 
 settings = Settings()

@@ -1,0 +1,16 @@
+# Root build context, used only by the top-level Dockerfile (the combined
+# HF Spaces image). backend/.dockerignore and frontend/.dockerignore are
+# separate and apply to their own subdirectory builds via docker-compose.
+.git/
+data/
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/*.pyc
+backend/.pytest_cache/
+backend/tests/
+backend/eval/
+backend/mcp_server/
+frontend/node_modules/
+frontend/dist/
+working demo.mp4

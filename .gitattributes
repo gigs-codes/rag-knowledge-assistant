@@ -1,0 +1,5 @@
+# Shell scripts run inside Linux containers — a CRLF shebang line breaks
+# them ("bad interpreter"). Force LF regardless of the committer's platform
+# or local git config, rather than relying on core.autocrlf behaving the
+# same way on every machine that ever touches this repo.
+*.sh text eol=lf
