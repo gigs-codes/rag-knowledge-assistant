@@ -1,4 +1,6 @@
-# Enterprise Knowledge Assistant
+# Enterprise Knowledge Assistant (RAG)
+
+**Contents:** [Problem](#the-problem-it-solves) · [How it solves it](#how-it-solves-it--high-level-overview) · [Architecture](#architecture) · [Stack](#stack) · [Running it](#running-it) · [Using it](#using-it) · [Future work](#future-work--roadmap)
 
 Upload company documents (PDF, DOCX, TXT, MD, CSV, XLSX — including tables
 inside PDFs) and ask questions in natural language. Answers are grounded in
@@ -9,6 +11,160 @@ JWT auth with role-based access control, a LangGraph agent with persistent
 memory, an MCP tool server, an LLM-as-judge evaluation harness, a feedback
 loop, request-level observability, lightweight guardrails, a CI pipeline,
 and a Pytest suite.
+
+## The Problem It Solves
+
+Company knowledge lives in scattered PDFs, Word files, spreadsheets, and
+notes. Finding an answer means opening files one by one — and asking a
+generic LLM instead is risky: it has never seen your documents, so it
+**hallucinates** confident-sounding answers with no way to verify them.
+Sending private documents to a hosted AI API also raises cost and
+data-privacy concerns.
+
+```mermaid
+flowchart LR
+    subgraph PROBLEM["❌ Without this project"]
+        direction TB
+        P1["📂 Knowledge scattered across<br/>PDF / DOCX / XLSX / CSV files"]
+        P2["🔍 Manual searching is slow<br/>& keyword search misses meaning"]
+        P3["🤖 Generic LLMs hallucinate —<br/>they never saw your documents"]
+        P4["❓ No sources → answers<br/>can't be trusted or verified"]
+        P5["💸 Hosted AI APIs cost money<br/>& send private data off-site"]
+    end
+
+    subgraph SOLUTION["✅ With RAG Knowledge Assistant"]
+        direction TB
+        S1["📥 One upload pipeline for<br/>6 formats incl. PDF tables"]
+        S2["⚡ Hybrid search: semantic vectors<br/>+ BM25 keywords + reranking"]
+        S3["📌 Answers grounded ONLY in<br/>retrieved document chunks"]
+        S4["🔗 Every answer cites the exact<br/>source chunk & similarity score"]
+        S5["🏠 100% local & free — Ollama,<br/>no API keys, data never leaves"]
+    end
+
+    P1 --> S1
+    P2 --> S2
+    P3 --> S3
+    P4 --> S4
+    P5 --> S5
+
+    style PROBLEM fill:#fdecea,stroke:#d93025,color:#000
+    style SOLUTION fill:#e6f4ea,stroke:#188038,color:#000
+```
+
+## How It Solves It — High-Level Overview
+
+```mermaid
+flowchart TB
+    U(["👤 User<br/>(Admin / Viewer)"])
+
+    subgraph FE["🖥️ Frontend — React + TypeScript + Tailwind"]
+        LOGIN["Login / Register"]
+        DOCS["Document Panel<br/>(upload · list · delete)"]
+        ASK["Ask Panel<br/>(streaming chat · citations · feedback)"]
+    end
+
+    subgraph BE["⚙️ Backend — FastAPI"]
+        AUTH["🔐 JWT Auth + RBAC"]
+        ING["📥 Ingestion Service"]
+        RET["🔎 Retrieval Service<br/>(hybrid + rerank)"]
+        CHAT["💬 Chat Service<br/>(prompt + generation)"]
+        AGENT["🧠 LangGraph ReAct Agent<br/>(search_documents · calculator)"]
+        GUARD["🛡️ Guardrails<br/>(PII redaction · injection detection)"]
+        FB["👍 Feedback Store"]
+    end
+
+    subgraph STORE["💾 Local Storage"]
+        CHROMA[("ChromaDB<br/>vectors")]
+        BM25[("BM25<br/>keyword index")]
+        REG[("Document registry<br/>JSON / Postgres")]
+        SQL[("SQLite<br/>users · feedback · agent memory")]
+    end
+
+    LLM["🦙 Ollama — phi3:mini<br/>(local LLM)"]
+    EMB["🔢 bge-small-en-v1.5<br/>embeddings"]
+    MCP["🔌 MCP Server<br/>(JSON-RPC / stdio)"]
+    EXT(["External MCP clients"])
+
+    U --> FE
+    FE -- "REST + SSE" --> AUTH
+    AUTH --> ING & CHAT & AGENT & FB
+    ING --> GUARD
+    ING --> EMB
+    ING --> CHROMA & BM25 & REG
+    CHAT --> RET
+    AGENT --> RET
+    RET --> CHROMA & BM25
+    RET --> GUARD
+    CHAT --> LLM
+    AGENT --> LLM
+    AGENT --> SQL
+    FB --> SQL
+    AUTH --> SQL
+    EXT --> MCP --> RET
+```
+
+### 1. Ingestion flow — turning documents into searchable knowledge
+
+```mermaid
+flowchart LR
+    A["📄 Upload file<br/>(Admin only)"] --> B{"File type?"}
+    B -- "PDF" --> C1["pypdf text<br/>+ pdfplumber tables → markdown"]
+    B -- "DOCX" --> C2["python-docx text"]
+    B -- "TXT / MD" --> C3["Raw text"]
+    B -- "CSV / XLSX" --> C4["Row-serialized text<br/>(csv / openpyxl)"]
+    C1 & C2 & C3 & C4 --> D["🧹 Clean text"]
+    D --> E["🛡️ Redact PII<br/>(emails · phones · SSNs)"]
+    E --> F["✂️ Chunk<br/>RecursiveCharacterTextSplitter"]
+    F --> G["🔢 Embed chunks<br/>bge-small-en-v1.5"]
+    G --> H[("ChromaDB<br/>vector store")]
+    F --> I[("BM25<br/>keyword index")]
+    F --> J[("Document registry<br/>metadata + chunk count")]
+```
+
+### 2. Query flow — answering a question with grounded citations
+
+```mermaid
+flowchart TB
+    Q["❓ User question"] --> AU{"🔐 Valid JWT?"}
+    AU -- "No" --> X["401 Unauthorized"]
+    AU -- "Yes" --> DEC{"Compound question?<br/>(X and Y?)"}
+    DEC -- "Yes" --> SUB["Decompose into<br/>sub-questions"]
+    DEC -- "No" --> HY
+    SUB --> HY
+
+    subgraph HY["🔎 Hybrid Retrieval — retrieve wide"]
+        direction LR
+        V["Vector search<br/>(semantic)"]
+        K["BM25 search<br/>(exact terms)"]
+    end
+
+    HY --> RRF["🔀 Reciprocal Rank Fusion"]
+    RRF --> RR["🎯 Cross-encoder rerank<br/>ms-marco-MiniLM — narrow down"]
+    RR --> FL["Relevance-score filter<br/>+ optional document scope → top-k"]
+    FL --> INJ["🛡️ Prompt-injection check<br/>(logged warning)"]
+    INJ --> CIT["📌 Send citations to UI<br/>(before generation starts)"]
+    INJ --> PR["🧾 Build grounded prompt<br/>context = retrieved chunks only"]
+    PR --> GEN["🦙 Ollama phi3:mini<br/>generates answer"]
+    GEN --> SSE["⚡ Stream tokens via SSE"]
+    SSE --> UI["💬 Answer + expandable citations"]
+    UI --> RATE["👍 / 👎 Feedback → SQLite"]
+```
+
+### 3. Agent flow — multi-step reasoning with memory
+
+```mermaid
+flowchart LR
+    Q["Question + thread_id"] --> MEM[("Load memory<br/>SQLite checkpointer")]
+    MEM --> T["💭 Thought"]
+    T --> D{"Action?"}
+    D -- "search_documents" --> S["Hybrid retrieval"]
+    D -- "calculator" --> C["Safe AST arithmetic"]
+    S --> O["👁️ Observation"]
+    C --> O
+    O --> T
+    D -- "Final Answer" --> A["✅ Answer"]
+    A --> SAVE[("Persist conversation<br/>survives restarts")]
+```
 
 ## Architecture
 
@@ -234,6 +390,53 @@ search as a tool outside this app entirely.
    server-side in SQLite and survives a backend restart.
 7. **Delete** any document from the sidebar — admin only, irreversible,
    guarded by a confirmation dialog.
+
+## Future Work / Roadmap
+
+```mermaid
+flowchart LR
+    NOW(["📍 Today<br/>Local, free, single-instance RAG"])
+
+    subgraph Q1["🔜 Near term"]
+        direction TB
+        F1["🖼️ OCR for scanned PDFs & images<br/>(Tesseract / vision model)"]
+        F2["📊 Context precision & recall<br/>metrics with multi-chunk golden set"]
+        F3["🗄️ Alembic DB migrations"]
+        F4["👑 Admin UI for user role management"]
+    end
+
+    subgraph Q2["🚀 Mid term"]
+        direction TB
+        F5["🧠 Larger / hosted LLMs via LLMProvider<br/>(better multi-hop agent reasoning)"]
+        F6["🔭 LangSmith / OpenTelemetry tracing<br/>+ token & cost tracking"]
+        F7["🛡️ NER-based PII detection &<br/>blocking injection guardrails"]
+        F8["🌐 Sandboxed web-search &<br/>code-execution agent tools"]
+    end
+
+    subgraph Q3["🏢 Long term"]
+        direction TB
+        F9["📈 Multi-instance scaling<br/>(Postgres + pgvector, shared stores)"]
+        F10["💾 Persistent storage for hosted demo"]
+        F11["🔄 Connectors: Drive / SharePoint /<br/>Confluence auto-sync"]
+        F12["🔁 Use feedback data to tune<br/>retrieval & prompts"]
+    end
+
+    NOW --> Q1 --> Q2 --> Q3
+```
+
+| Area | Planned improvement | Why it matters |
+|---|---|---|
+| Ingestion | OCR for scanned PDFs/images | Many real-world documents are scans with no text layer. |
+| Ingestion | Connectors for Google Drive, SharePoint, Confluence with auto re-sync | Keeps the knowledge base current without manual uploads. |
+| Retrieval | Context precision/recall in the eval harness | Measures retrieval quality, not just generation quality. |
+| Retrieval | Learn from 👍/👎 feedback (query rewriting, reranker tuning) | Closes the loop — the system improves with use. |
+| LLM / Agent | Swap in larger or hosted models through `LLMProvider` | Lower latency and reliable multi-hop tool use. |
+| Agent tools | Sandboxed code execution & web search | More capable agent without prompt-injection → RCE risk. |
+| Safety | NER-based PII detection; blocking (not just logging) injection guardrails | Production-grade protection for sensitive documents. |
+| Observability | LangSmith / OpenTelemetry tracing, token & cost metering | Needed once a paid, hosted LLM is introduced. |
+| Data layer | Alembic migrations; Postgres + pgvector for all stores | Safe schema evolution and multi-instance deployments. |
+| Auth | Admin UI / API for promoting users and managing roles | Removes the need for direct database edits. |
+| Deployment | Persistent storage for the Hugging Face demo | Uploaded docs and accounts survive redeploys. |
 
 ## What's deliberately not built, and why
 
