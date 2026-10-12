@@ -1,25 +1,12 @@
 # Enterprise Knowledge Assistant (RAG)
 
-**Contents:** [Problem](#the-problem-it-solves) · [How it solves it](#how-it-solves-it--high-level-overview) · [Architecture](#architecture) · [Stack](#stack) · [Running it](#running-it) · [Using it](#using-it) · [Future work](#future-work--roadmap)
+Ask questions about your company documents and get answers **grounded in those documents, with citations** — running 100% locally and free (no API keys).
 
-Upload company documents (PDF, DOCX, TXT, MD, CSV, XLSX — including tables
-inside PDFs) and ask questions in natural language. Answers are grounded in
-your documents via hybrid (vector + keyword) retrieval with cross-encoder
-reranking, streamed token-by-token, and cited back to the exact source
-chunk. Runs entirely locally and free — no API keys required. Includes
-JWT auth with role-based access control, a LangGraph agent with persistent
-memory, an MCP tool server, an LLM-as-judge evaluation harness, a feedback
-loop, request-level observability, lightweight guardrails, a CI pipeline,
-and a Pytest suite.
+📹 See [`working demo.mp4`](working%20demo.mp4) for a walkthrough.
 
 ## The Problem It Solves
 
-Company knowledge lives in scattered PDFs, Word files, spreadsheets, and
-notes. Finding an answer means opening files one by one — and asking a
-generic LLM instead is risky: it has never seen your documents, so it
-**hallucinates** confident-sounding answers with no way to verify them.
-Sending private documents to a hosted AI API also raises cost and
-data-privacy concerns.
+Generic LLMs have never seen your documents, so they **hallucinate** unverifiable answers — and hosted AI APIs cost money and send private data off-site. This project retrieves the relevant passages from *your* files first, then answers only from them, citing the exact source.
 
 ```mermaid
 flowchart LR
@@ -51,7 +38,7 @@ flowchart LR
     style SOLUTION fill:#e6f4ea,stroke:#188038,color:#000
 ```
 
-## How It Solves It — High-Level Overview
+## How It Works
 
 ```mermaid
 flowchart TB
@@ -103,25 +90,7 @@ flowchart TB
     EXT --> MCP --> RET
 ```
 
-### 1. Ingestion flow — turning documents into searchable knowledge
-
-```mermaid
-flowchart LR
-    A["📄 Upload file<br/>(Admin only)"] --> B{"File type?"}
-    B -- "PDF" --> C1["pypdf text<br/>+ pdfplumber tables → markdown"]
-    B -- "DOCX" --> C2["python-docx text"]
-    B -- "TXT / MD" --> C3["Raw text"]
-    B -- "CSV / XLSX" --> C4["Row-serialized text<br/>(csv / openpyxl)"]
-    C1 & C2 & C3 & C4 --> D["🧹 Clean text"]
-    D --> E["🛡️ Redact PII<br/>(emails · phones · SSNs)"]
-    E --> F["✂️ Chunk<br/>RecursiveCharacterTextSplitter"]
-    F --> G["🔢 Embed chunks<br/>bge-small-en-v1.5"]
-    G --> H[("ChromaDB<br/>vector store")]
-    F --> I[("BM25<br/>keyword index")]
-    F --> J[("Document registry<br/>metadata + chunk count")]
-```
-
-### 2. Query flow — answering a question with grounded citations
+**Query flow** — retrieve wide, rerank narrow, answer only from retrieved chunks:
 
 ```mermaid
 flowchart TB
@@ -150,7 +119,29 @@ flowchart TB
     UI --> RATE["👍 / 👎 Feedback → SQLite"]
 ```
 
-### 3. Agent flow — multi-step reasoning with memory
+<details>
+<summary><b>Ingestion flow (upload → searchable knowledge)</b></summary>
+
+```mermaid
+flowchart LR
+    A["📄 Upload file<br/>(Admin only)"] --> B{"File type?"}
+    B -- "PDF" --> C1["pypdf text<br/>+ pdfplumber tables → markdown"]
+    B -- "DOCX" --> C2["python-docx text"]
+    B -- "TXT / MD" --> C3["Raw text"]
+    B -- "CSV / XLSX" --> C4["Row-serialized text<br/>(csv / openpyxl)"]
+    C1 & C2 & C3 & C4 --> D["🧹 Clean text"]
+    D --> E["🛡️ Redact PII<br/>(emails · phones · SSNs)"]
+    E --> F["✂️ Chunk<br/>RecursiveCharacterTextSplitter"]
+    F --> G["🔢 Embed chunks<br/>bge-small-en-v1.5"]
+    G --> H[("ChromaDB<br/>vector store")]
+    F --> I[("BM25<br/>keyword index")]
+    F --> J[("Document registry<br/>metadata + chunk count")]
+```
+
+</details>
+
+<details>
+<summary><b>Agent flow (multi-step reasoning with memory)</b></summary>
 
 ```mermaid
 flowchart LR
@@ -166,7 +157,84 @@ flowchart LR
     A --> SAVE[("Persist conversation<br/>survives restarts")]
 ```
 
-## Architecture
+</details>
+
+## Key Features
+
+- 📥 **6 formats** — PDF (incl. tables), DOCX, TXT, MD, CSV, XLSX
+- 🔎 **Hybrid retrieval** — vector + BM25 keyword search, RRF fusion, cross-encoder reranking
+- 📌 **Cited, streamed answers** — token-by-token via SSE, each answer linked to its source chunk
+- 🧠 **LangGraph agent** with tools and SQLite-persisted memory
+- 🔐 **JWT auth + RBAC** (admin / viewer)
+- 🛡️ **Guardrails** — PII redaction at ingest, prompt-injection detection
+- 📊 **LLM-as-judge eval**, feedback loop, MCP tool server, CI + Pytest suite
+
+## Quick Start
+
+**Prerequisite:** [Ollama](https://ollama.com) running with the model pulled — `ollama pull phi3:mini && ollama serve`
+
+```bash
+# Option A — Docker (backend + frontend)
+docker compose up --build          # UI: http://localhost:5173 · API: http://localhost:8000
+
+# Option B — run locally (Python 3.11+, Node 18+)
+cd backend && pip install -r requirements.txt && uvicorn app.main:app --reload --port 8000
+cd frontend && npm install && npm run dev
+```
+
+The first account you register becomes **admin** (can upload/delete documents); later accounts are **viewers**. Set a real `EKA_JWT_SECRET_KEY` before deploying anywhere shared.
+
+## Tech Stack
+
+| Layer | Choice |
+|---|---|
+| LLM | Ollama `phi3:mini` (swappable via `LLMProvider`) |
+| Embeddings / Reranker | `bge-small-en-v1.5` / `ms-marco-MiniLM-L-6-v2` |
+| Search | ChromaDB (vectors) + BM25Plus (keywords), fused with RRF |
+| Storage | JSON or Postgres (metadata), SQLite (users, feedback, agent memory) |
+| Backend / Frontend | FastAPI + Pydantic / React + TypeScript + Tailwind (Vite) |
+| Agent | Hand-built LangGraph ReAct loop |
+| Ops | Docker, GitHub Actions CI, Pytest |
+
+## Future Work
+
+```mermaid
+flowchart LR
+    NOW(["📍 Today<br/>Local, free, single-instance RAG"])
+
+    subgraph Q1["🔜 Near term"]
+        direction TB
+        F1["🖼️ OCR for scanned PDFs & images<br/>(Tesseract / vision model)"]
+        F2["📊 Context precision & recall<br/>metrics with multi-chunk golden set"]
+        F3["🗄️ Alembic DB migrations"]
+        F4["👑 Admin UI for user role management"]
+    end
+
+    subgraph Q2["🚀 Mid term"]
+        direction TB
+        F5["🧠 Larger / hosted LLMs via LLMProvider<br/>(better multi-hop agent reasoning)"]
+        F6["🔭 LangSmith / OpenTelemetry tracing<br/>+ token & cost tracking"]
+        F7["🛡️ NER-based PII detection &<br/>blocking injection guardrails"]
+        F8["🌐 Sandboxed web-search &<br/>code-execution agent tools"]
+    end
+
+    subgraph Q3["🏢 Long term"]
+        direction TB
+        F9["📈 Multi-instance scaling<br/>(Postgres + pgvector, shared stores)"]
+        F10["💾 Persistent storage for hosted demo"]
+        F11["🔄 Connectors: Drive / SharePoint /<br/>Confluence auto-sync"]
+        F12["🔁 Use feedback data to tune<br/>retrieval & prompts"]
+    end
+
+    NOW --> Q1 --> Q2 --> Q3
+```
+
+---
+
+## More Details
+
+<details>
+<summary><b>Project structure</b></summary>
 
 ```
 frontend/  React + TypeScript + Tailwind
@@ -220,7 +288,10 @@ Swapping Ollama for OpenAI, Chroma for FAISS/pgvector, or JSON for Postgres
 means changing `app/api/deps.py` and adding one new adapter file — not
 touching routes, business logic, or tests.
 
-## Stack
+</details>
+
+<details>
+<summary><b>Full stack — design rationale</b></summary>
 
 | Layer | Choice | Why |
 |---|---|---|
@@ -245,47 +316,43 @@ touching routes, business logic, or tests.
 | CI | GitHub Actions | Backend `pytest` + frontend `npm run build` on every push/PR. |
 | Deployment | Docker + docker-compose | Backend + frontend containerized; Ollama stays on the host for GPU access. |
 
-## Running it
+</details>
 
-### Prerequisites
-- Python 3.11+, Node 18+
-- [Ollama](https://ollama.com) installed and running, with the model pulled:
-  ```
-  ollama pull phi3:mini
-  ollama serve
-  ```
+<details>
+<summary><b>Using the app (step by step)</b></summary>
 
-### Backend
-```bash
-cd backend
-python -m venv .venv
-./.venv/Scripts/activate      # Windows
-# source .venv/bin/activate   # macOS/Linux
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
-```
-API docs: http://localhost:8000/docs
+1. **Register / sign in.** The very first account ever registered becomes
+   **admin**; every account after that is a **viewer**. Admins can upload
+   and delete documents and review the feedback log; viewers can query,
+   use the agent, and browse existing documents.
+2. **Upload** a document (PDF, DOCX, TXT, MD, CSV, or XLSX) — admin only.
+   Wait for embedding to finish — the chunk count appears once it's
+   searchable. Tables inside PDFs are extracted separately and appended
+   as markdown; PII (emails, phone numbers, SSNs) is redacted before
+   anything is embedded or stored.
+3. **Ask** a question in the chat panel — retrieval fuses vector and
+   keyword search results and reranks them before the answer streams in
+   token-by-token, with citations appearing as soon as retrieval
+   completes (before generation even starts). Compound questions
+   ("X and Y?") are automatically decomposed into sub-questions first.
+   Optionally select a specific document to scope retrieval to just that
+   file.
+4. **Rate an answer** — "Helpful" / "Not helpful" buttons appear once an
+   answer finishes streaming; one rating per answer, logged for later
+   review (admin-only `GET /feedback`).
+5. **Expand a citation** to see the exact source chunk, filename, chunk
+   index, and similarity score the model was shown.
+6. Conversation history persists across page refreshes (via
+   `localStorage`) — use "Clear conversation" to reset it. The **agent's**
+   memory (`/agent/ask`, keyed by `thread_id`) is separately persisted
+   server-side in SQLite and survives a backend restart.
+7. **Delete** any document from the sidebar — admin only, irreversible,
+   guarded by a confirmation dialog.
 
-### Frontend
-```bash
-cd frontend
-npm install
-npm run dev
-```
-App: whatever URL Vite prints (proxies `/api/*` to the backend on :8000) —
-defaults to http://localhost:5173, but Vite falls back to the next free
-port (5174, 5175, ...) if that's already in use.
+</details>
 
-### Docker (backend + frontend; Ollama stays on the host)
-```bash
-docker compose up --build
-```
-Frontend: http://localhost:5173 · Backend: http://localhost:8000
-
-Set a real `EKA_JWT_SECRET_KEY` (env var or `.env`) before deploying
-anywhere shared — it defaults to a dev-only placeholder otherwise.
-
-### Deploying a live demo (Hugging Face Spaces)
+<details>
+<summary><b>Deploying a live demo (Hugging Face Spaces)</b></summary>
 
 The root `Dockerfile` (distinct from `backend/Dockerfile` and
 `frontend/Dockerfile`, which are for the two-container `docker compose`
@@ -330,7 +397,12 @@ docker run -p 7860:7860 eka-demo
 ```
 App: http://localhost:7860
 
-### Tests
+</details>
+
+<details>
+<summary><b>Tests, evaluation & MCP server</b></summary>
+
+#### Tests
 ```bash
 cd backend
 pytest -q
@@ -343,7 +415,7 @@ Postgres-specific tests skip automatically unless `EKA_TEST_DATABASE_URL`
 points at a reachable database. Runs automatically on push/PR via
 `.github/workflows/ci.yml`.
 
-### Evaluation
+#### Evaluation
 ```bash
 cd backend
 python -m eval.run_eval
@@ -352,7 +424,7 @@ Ingests a fixture document through the real pipeline, asks a golden set of
 8 questions through the real `ChatService`, scores faithfulness and answer
 relevancy with an LLM judge, prints a report, writes `eval/results.json`.
 
-### MCP server
+#### MCP server
 ```bash
 cd backend
 python -m mcp_server.server
@@ -361,84 +433,10 @@ Speaks JSON-RPC 2.0 over stdio (`initialize`, `tools/list`, `tools/call`)
 — point any MCP-compatible client at this command to expose document
 search as a tool outside this app entirely.
 
-## Using it
+</details>
 
-1. **Register / sign in.** The very first account ever registered becomes
-   **admin**; every account after that is a **viewer**. Admins can upload
-   and delete documents and review the feedback log; viewers can query,
-   use the agent, and browse existing documents.
-2. **Upload** a document (PDF, DOCX, TXT, MD, CSV, or XLSX) — admin only.
-   Wait for embedding to finish — the chunk count appears once it's
-   searchable. Tables inside PDFs are extracted separately and appended
-   as markdown; PII (emails, phone numbers, SSNs) is redacted before
-   anything is embedded or stored.
-3. **Ask** a question in the chat panel — retrieval fuses vector and
-   keyword search results and reranks them before the answer streams in
-   token-by-token, with citations appearing as soon as retrieval
-   completes (before generation even starts). Compound questions
-   ("X and Y?") are automatically decomposed into sub-questions first.
-   Optionally select a specific document to scope retrieval to just that
-   file.
-4. **Rate an answer** — "Helpful" / "Not helpful" buttons appear once an
-   answer finishes streaming; one rating per answer, logged for later
-   review (admin-only `GET /feedback`).
-5. **Expand a citation** to see the exact source chunk, filename, chunk
-   index, and similarity score the model was shown.
-6. Conversation history persists across page refreshes (via
-   `localStorage`) — use "Clear conversation" to reset it. The **agent's**
-   memory (`/agent/ask`, keyed by `thread_id`) is separately persisted
-   server-side in SQLite and survives a backend restart.
-7. **Delete** any document from the sidebar — admin only, irreversible,
-   guarded by a confirmation dialog.
-
-## Future Work / Roadmap
-
-```mermaid
-flowchart LR
-    NOW(["📍 Today<br/>Local, free, single-instance RAG"])
-
-    subgraph Q1["🔜 Near term"]
-        direction TB
-        F1["🖼️ OCR for scanned PDFs & images<br/>(Tesseract / vision model)"]
-        F2["📊 Context precision & recall<br/>metrics with multi-chunk golden set"]
-        F3["🗄️ Alembic DB migrations"]
-        F4["👑 Admin UI for user role management"]
-    end
-
-    subgraph Q2["🚀 Mid term"]
-        direction TB
-        F5["🧠 Larger / hosted LLMs via LLMProvider<br/>(better multi-hop agent reasoning)"]
-        F6["🔭 LangSmith / OpenTelemetry tracing<br/>+ token & cost tracking"]
-        F7["🛡️ NER-based PII detection &<br/>blocking injection guardrails"]
-        F8["🌐 Sandboxed web-search &<br/>code-execution agent tools"]
-    end
-
-    subgraph Q3["🏢 Long term"]
-        direction TB
-        F9["📈 Multi-instance scaling<br/>(Postgres + pgvector, shared stores)"]
-        F10["💾 Persistent storage for hosted demo"]
-        F11["🔄 Connectors: Drive / SharePoint /<br/>Confluence auto-sync"]
-        F12["🔁 Use feedback data to tune<br/>retrieval & prompts"]
-    end
-
-    NOW --> Q1 --> Q2 --> Q3
-```
-
-| Area | Planned improvement | Why it matters |
-|---|---|---|
-| Ingestion | OCR for scanned PDFs/images | Many real-world documents are scans with no text layer. |
-| Ingestion | Connectors for Google Drive, SharePoint, Confluence with auto re-sync | Keeps the knowledge base current without manual uploads. |
-| Retrieval | Context precision/recall in the eval harness | Measures retrieval quality, not just generation quality. |
-| Retrieval | Learn from 👍/👎 feedback (query rewriting, reranker tuning) | Closes the loop — the system improves with use. |
-| LLM / Agent | Swap in larger or hosted models through `LLMProvider` | Lower latency and reliable multi-hop tool use. |
-| Agent tools | Sandboxed code execution & web search | More capable agent without prompt-injection → RCE risk. |
-| Safety | NER-based PII detection; blocking (not just logging) injection guardrails | Production-grade protection for sensitive documents. |
-| Observability | LangSmith / OpenTelemetry tracing, token & cost metering | Needed once a paid, hosted LLM is introduced. |
-| Data layer | Alembic migrations; Postgres + pgvector for all stores | Safe schema evolution and multi-instance deployments. |
-| Auth | Admin UI / API for promoting users and managing roles | Removes the need for direct database edits. |
-| Deployment | Persistent storage for the Hugging Face demo | Uploaded docs and accounts survive redeploys. |
-
-## What's deliberately not built, and why
+<details>
+<summary><b>What's deliberately not built, and why</b></summary>
 
 - **OCR for scanned PDFs/images** — would need a system-level binary
   (Tesseract) or a heavier vision model, breaking the zero-friction local
@@ -464,7 +462,10 @@ flowchart LR
   short enough to fit in one chunk, so only faithfulness and answer
   relevancy (generation-quality metrics) are measured.
 
-## Known limitations, stated plainly
+</details>
+
+<details>
+<summary><b>Known limitations</b></summary>
 
 - `phi3:mini` (3.8B, CPU) is the latency bottleneck — expect 3-60s per
   answer depending on whether the model is already warm, and it struggles
@@ -492,3 +493,5 @@ flowchart LR
   account ever registered — promoting a later account is a direct
   database edit, not an API surface (deliberately: it shouldn't be
   reachable by a compromised viewer token).
+
+</details>
